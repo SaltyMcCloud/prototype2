@@ -1,0 +1,4 @@
+var StopWatch = function()
+{
+	
+}

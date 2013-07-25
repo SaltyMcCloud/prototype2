@@ -1,0 +1,528 @@
+<html>
+
+	<head>
+		<title>Noise Shader Test</title>
+		<style>
+			canvas
+			{ 
+				width: 100%;
+				height: 100%;
+			}
+			body
+			{
+				padding:0;
+				margin:0;
+				overflow:hidden;
+				font-family:georgia;
+				text-align:center;
+			}
+		</style>
+		
+	</head>
+	
+	<body id="body" oncontextmenu="return false">
+
+		<div id="container">
+
+
+		</div>
+		
+		
+		
+		<!--script src="Script/jquery-1.8.3.min.js"></script-->
+		<script src="Script/underscore-min.js"></script>
+		<script src="Script/Three.full.js"></script>
+		<script src="Script/Utils.js"></script>
+		<script src="Script/Shaders.js"></script>
+		
+		
+		<script src="Script/ShaderExtras.js"></script>
+		<script src="Script/postprocessing/EffectComposer.js"></script>
+		<script src="Script/postprocessing/RenderPass.js"></script>
+		<script src="Script/postprocessing/BloomPass.js"></script>
+		<script src="Script/postprocessing/ShaderPass.js"></script>
+		<script src="Script/postprocessing/MaskPass.js"></script>
+		<script src="Script/postprocessing/SavePass.js"></script>
+		<script src="Script/CopyShader.js"></script>
+		
+		<script id='blur-vertex-shader' type='x-shader/x-vertex'>
+			varying vec2 vUv;
+			
+			void main()
+			{
+				vUv = uv;
+				gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+			}
+		</script>
+		
+		<script id='blur-fragment-shader' type='x-shader/x-fragment'>
+			varying vec2 vUv;
+			uniform sampler2D tDiffuse;
+			uniform float distance;
+			
+			void main()
+			{
+				float dx = 1.0 / 1440.0 * distance;
+				float dy = 1.0 / 900.0 * distance;
+				vec4 color = texture2D(tDiffuse, vec2(vUv.x, vUv.y));
+				//vec4 color = vec4(0., 0., 0., 1.0);
+				float numcolors = 0.0;
+				//for(float x = -distance / 2.0; x < distance / 2.0; ++x)
+				//{
+				//	for(float y = -distance / 2.0; y < distance / 2.0; ++y)
+				//	{
+				//		color = color + texture2D(tDiffuse, vec2(vUv.x + x, vUv.y + y));
+				//		numcolors = numcolors + 1.;
+				//	}
+				//}
+				
+				vec4 color1 = texture2D( tDiffuse, vec2(vUv.x - dx, vUv.y) );
+				vec4 color2 = texture2D( tDiffuse, vec2(vUv.x + dx, vUv.y) );
+				vec4 color3 = texture2D( tDiffuse, vec2(vUv.x, vUv.y - dy) );
+				vec4 color4 = texture2D( tDiffuse, vec2(vUv.x, vUv.y + dy) );
+				//if(distance > 0.)
+					//gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+				//else	
+					gl_FragColor = (color + color1 + color2 + color3 + color4) / 5.0;
+			}
+		</script>
+		
+		<script id='noise-vertex-shader' type='x-shader/x-vertex'>
+			varying vec3 vNormal;
+			varying vec2 vUv;
+			varying float noise;
+			uniform float time;
+			uniform float uTime;
+			
+			vec3 mod289(vec3 x)
+			{
+			  return x - floor(x * (1.0 / 289.0)) * 289.0;
+			}
+
+			vec4 mod289(vec4 x)
+			{
+			  return x - floor(x * (1.0 / 289.0)) * 289.0;
+			}
+			
+			vec4 permute(vec4 x)
+			{
+			  return mod289(((x*34.0)+1.0)*x);
+			}
+
+			vec4 taylorInvSqrt(vec4 r)
+			{
+			  return 1.79284291400159 - 0.85373472095314 * r;
+			}
+
+			vec3 fade(vec3 t)
+			{
+			  return t*t*t*(t*(t*6.0-15.0)+10.0);
+			}
+			
+			float pnoise(vec3 P, vec3 rep)
+			{
+			  vec3 Pi0 = mod(floor(P), rep); // Integer part, modulo period
+			  vec3 Pi1 = mod(Pi0 + vec3(1.0), rep); // Integer part + 1, mod period
+			  Pi0 = mod289(Pi0);
+			  Pi1 = mod289(Pi1);
+			  vec3 Pf0 = fract(P); // Fractional part for interpolation
+			  vec3 Pf1 = Pf0 - vec3(1.0); // Fractional part - 1.0
+			  vec4 ix = vec4(Pi0.x, Pi1.x, Pi0.x, Pi1.x);
+			  vec4 iy = vec4(Pi0.yy, Pi1.yy);
+			  vec4 iz0 = Pi0.zzzz;
+			  vec4 iz1 = Pi1.zzzz;
+
+			  vec4 ixy = permute(permute(ix) + iy);
+			  vec4 ixy0 = permute(ixy + iz0);
+			  vec4 ixy1 = permute(ixy + iz1);
+
+			  vec4 gx0 = ixy0 * (1.0 / 7.0);
+			  vec4 gy0 = fract(floor(gx0) * (1.0 / 7.0)) - 0.5;
+			  gx0 = fract(gx0);
+			  vec4 gz0 = vec4(0.5) - abs(gx0) - abs(gy0);
+			  vec4 sz0 = step(gz0, vec4(0.0));
+			  gx0 -= sz0 * (step(0.0, gx0) - 0.5);
+			  gy0 -= sz0 * (step(0.0, gy0) - 0.5);
+
+			  vec4 gx1 = ixy1 * (1.0 / 7.0);
+			  vec4 gy1 = fract(floor(gx1) * (1.0 / 7.0)) - 0.5;
+			  gx1 = fract(gx1);
+			  vec4 gz1 = vec4(0.5) - abs(gx1) - abs(gy1);
+			  vec4 sz1 = step(gz1, vec4(0.0));
+			  gx1 -= sz1 * (step(0.0, gx1) - 0.5);
+			  gy1 -= sz1 * (step(0.0, gy1) - 0.5);
+
+			  vec3 g000 = vec3(gx0.x,gy0.x,gz0.x);
+			  vec3 g100 = vec3(gx0.y,gy0.y,gz0.y);
+			  vec3 g010 = vec3(gx0.z,gy0.z,gz0.z);
+			  vec3 g110 = vec3(gx0.w,gy0.w,gz0.w);
+			  vec3 g001 = vec3(gx1.x,gy1.x,gz1.x);
+			  vec3 g101 = vec3(gx1.y,gy1.y,gz1.y);
+			  vec3 g011 = vec3(gx1.z,gy1.z,gz1.z);
+			  vec3 g111 = vec3(gx1.w,gy1.w,gz1.w);
+
+			  vec4 norm0 = taylorInvSqrt(vec4(dot(g000, g000), dot(g010, g010), dot(g100, g100), dot(g110, g110)));
+			  g000 *= norm0.x;
+			  g010 *= norm0.y;
+			  g100 *= norm0.z;
+			  g110 *= norm0.w;
+			  vec4 norm1 = taylorInvSqrt(vec4(dot(g001, g001), dot(g011, g011), dot(g101, g101), dot(g111, g111)));
+			  g001 *= norm1.x;
+			  g011 *= norm1.y;
+			  g101 *= norm1.z;
+			  g111 *= norm1.w;
+
+			  float n000 = dot(g000, Pf0);
+			  float n100 = dot(g100, vec3(Pf1.x, Pf0.yz));
+			  float n010 = dot(g010, vec3(Pf0.x, Pf1.y, Pf0.z));
+			  float n110 = dot(g110, vec3(Pf1.xy, Pf0.z));
+			  float n001 = dot(g001, vec3(Pf0.xy, Pf1.z));
+			  float n101 = dot(g101, vec3(Pf1.x, Pf0.y, Pf1.z));
+			  float n011 = dot(g011, vec3(Pf0.x, Pf1.yz));
+			  float n111 = dot(g111, Pf1);
+
+			  vec3 fade_xyz = fade(Pf0);
+			  vec4 n_z = mix(vec4(n000, n100, n010, n110), vec4(n001, n101, n011, n111), fade_xyz.z);
+			  vec2 n_yz = mix(n_z.xy, n_z.zw, fade_xyz.y);
+			  float n_xyz = mix(n_yz.x, n_yz.y, fade_xyz.x); 
+			  return 2.2 * n_xyz;
+			}
+			
+			float turbulence(vec3 point)
+			{
+				float w = 100.0;
+				float t = -.5;
+				
+				for(float f = 1.0; f <= 10.0; ++f)
+				{
+					float power = pow(2.0, f);
+					t += abs(pnoise(vec3(power * point), vec3(10.0)) / power);
+				}
+				
+				return t;
+			}
+
+			void main()
+			{
+				vUv = uv;
+				vNormal = normalMatrix  * normal;
+				// add time to the noise parameters so it's animated
+				noise = 17.0 *  -.10 * turbulence( .5 * normal + time );
+				float b =  40.0 * pnoise( 0.05 * position + vec3( 2.0 * time ), vec3( 100.0 ) );
+				float displacement = - noise + b;
+				 
+				vec3 newPosition = position * (1.0 + 2.0 * sin(uTime)) + normal * displacement;
+				gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
+				//gl_Position = projectionMatrix * modelViewMatrix * vec4( position * 2., 1.0 );
+			}
+		</script>
+		
+		<script id='noise-fragment-shader' type='x-shader/x-fragment'>
+			varying vec2 vUv;
+			uniform sampler2D tDiffuse;
+			varying float noise;
+			varying vec3 vNormal;
+			uniform float random_seed;
+			
+			float random(vec3 scale, float seed)
+			{
+				return fract(sin(dot(gl_FragCoord.xyz + seed, scale)) * 43758.5453 + seed);
+			}
+			
+			void main()
+			{
+				// get a random offset
+				float r = .01 * random( vec3( 12.9898, 78.233, 151.7182 ), random_seed );
+				vec3 light = vec3(0.0, -0.25, 0.0);
+				// lookup vertically in the texture, using noise and offset
+				// to get the right RGB colour
+				vec2 tPos = vec2( 1.0 - 1.3 * noise + r , 1.0 - 1.3 * noise + r );
+				float prod = 0.5 + 5.0 * max(0.0, dot(vNormal, light));
+				vec4 color = texture2D( tDiffuse, tPos );
+				//color = color * prod;
+				//if(random_seed != 0.0)
+				//	gl_FragColor = vec4(0.0, .5, 0.0, 0.5);
+				//else
+				//color.r = color.r * .4 * noise;
+				float a = 1.;
+					gl_FragColor = vec4( color.rgb, a );
+			} 
+		</script>
+		
+		<script id='my-vertex-shader' type='x-shader/x-vertex'>
+			varying vec3 vNormal;
+
+			void main()
+			{
+				// Calculate normal in view space
+				vNormal = normalMatrix * vec3(normal);
+				
+				vec3 newPos = position;
+				gl_Position = projectionMatrix *
+							modelViewMatrix *
+							vec4(newPos, 1.0);
+			}
+		</script>
+
+		<script id='my-fragment-shader' type='x-shader/x-fragment'>
+			varying vec3 vNormal;
+			
+			vec4 transform(float u)
+			{
+				if (u > 0.95)
+					return vec4(0.5,1.0,0.5,1.0);
+				else if (u > 0.5)
+					return vec4(0.3,0.8,0.3,1.0);
+				else if (u > 0.25)
+					return vec4(0.2,0.4,0.2,1.0);
+				else
+					return vec4(0.1,0.2,0.1,1.0);
+			}
+
+			void main()
+			{
+				vec3 light = vec3(1.0, 1.0, 1.0);
+				// normalize light vector
+				light = normalize(light);
+				float prod = max(0.0, dot(normalize(vNormal), light));
+				gl_FragColor = transform(prod);
+				if(prod >= 0.2 && prod <= 0.4)
+					discard;
+			}
+		</script>
+		
+		<script id='post-vertex-shader' type='x-shader/x-vertex'>
+			varying vec2 vUv;
+			varying float depth;
+
+			void main()
+			{
+				vUv = uv;
+				
+				depth = distance(position, cameraPosition);
+				
+				gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+			}
+		</script>
+
+		<script id='post-fragment-shader' type='x-shader/x-fragment'>
+				
+			varying vec2 vUv;
+			varying float depth;
+			uniform sampler2D tDiffuse; // input texture
+			
+			const int blurDistance = 3;
+			const int offsetLength = blurDistance + 3;
+			float blurSize = 3.0;
+			
+			uniform float focalLength;
+			float fLength = 300.0;
+			float CoC = 100.0;
+
+			void main()
+			{
+				vec4 color = texture2D( tDiffuse, vUv );
+				vec4 c = vec4(0.0);
+				
+				c += texture2D(tDiffuse, vec2(vUv.x - 4.0 * blurSize, vUv.y));// * 0.05;
+			    c += texture2D(tDiffuse, vec2(vUv.x - 3.0 * blurSize, vUv.y));// * 0.09;
+			    c += texture2D(tDiffuse, vec2(vUv.x - 2.0 * blurSize, vUv.y));// * 0.12;
+			    c += texture2D(tDiffuse, vec2(      vUv.x - blurSize, vUv.y));// * 0.15;
+			    c += texture2D(tDiffuse, vec2(			       vUv.x, vUv.y));// * 0.16;
+			    c += texture2D(tDiffuse, vec2(      vUv.x + blurSize, vUv.y));// * 0.15;
+			    c += texture2D(tDiffuse, vec2(vUv.x + 2.0 * blurSize, vUv.y));// * 0.12;
+		   	    c += texture2D(tDiffuse, vec2(vUv.x + 3.0 * blurSize, vUv.y));// * 0.09;
+			    c += texture2D(tDiffuse, vec2(vUv.x + 4.0 * blurSize, vUv.y));// * 0.05;
+				
+				//if(abs(depth - fLength) > CoC)
+				/*
+				{
+					int leftmostX = int(vUv.x) - offsetLength / 2;
+					int uvY = int(vUv.y) - offsetLength / 2;
+					int pixelCount = 0;
+					
+					for(int i = 0; i < offsetLength; ++i)
+					{
+						int uvX = leftmostX;
+						for(int j = 0; j < offsetLength; ++j)
+						{
+							vec4 _c = texture2D(tDiffuse, vec2(float(uvX), float(uvY)));
+							c += _c;
+							++uvX;
+							pixelCount++;
+						}
+						++uvY;
+					}
+					
+					c /= float(pixelCount);
+				}
+				*/
+				
+				c = color;
+				
+				gl_FragColor = c;
+			}
+		</script>
+		
+		<!-- DEPTH OF FIELD SHADER --->
+			<!-- vertex shader -->
+		<script id='DoF-vertex-shader' type='x-shader/x-vertex'>
+			varying vec2 vUv;
+			
+
+			void main()
+			{
+				vUv = uv;
+				gl_Position = 
+					projectionMatrix *
+					modelViewMatrix *
+					vec4( position, 1.0 );
+			}
+		</script>
+		
+			<!-- fragment shader -->
+		<script id='DoF-fragment-shader' type='x-shader/x-fragment'>
+			varying vec2 vUv;
+			
+			uniform sampler2D colorTexture;
+			uniform sampler2D depthTexture;
+			
+			uniform float textureWidth;
+			uniform float textureHeight;
+			float width = textureWidth;
+			float height = textureHeight;
+			
+			const float PI = 3.14159265;
+			
+			uniform float focalDepth;
+			uniform float focalLength;
+			
+			uniform float fStop;
+			uniform bool showFocus;
+			
+			uniform float znear;
+			uniform float zfar;
+			
+			uniform float maxBlur;
+			
+			vec2 texel = vec2(1.0 / width, 1.0 / height);
+			
+			uniform float fringe;
+			uniform float bias;
+			
+			uniform float gain;
+			uniform float threshold;
+			
+			uniform float dithering;
+			float amount = dithering;
+			
+			float CoC = 0.03; //Circle of Confusion size
+			
+			const int samples = 4;
+			const int rings = 4;
+			
+			const int maxringsamples = samples * rings;
+			
+			vec3 color(vec2 coords, float blur)
+			{
+				vec3 c = vec3(0.0);
+				
+				c.r = texture2D(colorTexture, coords + vec2(0.0, 1.0) * texel * fringe * blur).r;
+				c.g = texture2D(colorTexture, coords + vec2(-0.866, -09.5) * texel * fringe * blur).g;
+				c.b = texture2D(colorTexture, coords + vec2(0.866, -0.5) * texel * fringe * blur).b;
+				
+				vec3 lumCoeff = vec3(0.299, 0.587, 0.114);
+				float lum = dot(c.rgb, lumCoeff);
+				float thresh = max((lum - threshold) * gain, 0.0);
+				
+				return c + mix(vec3(0.0), c, thresh * blur);
+			}
+			
+			vec2 rand(vec2 coord)
+			{
+				float noiseX = ((fract(1.0 - coord.s * (width / 2.0)) * 0.25) + 
+								(fract(coord.t * (height / 2.0)) * 0.75)) * 2.0 - 1.0;
+				
+				float noiseY = ((fract(1.0 - coord.s * (width / 2.0)) * 0.75) + 
+								(fract(coord.t * (height / 2.0)) * 0.25)) * 2.0 - 1.0;
+								
+				return vec2(noiseX, noiseY);
+			}
+			
+			float linearize(float depth)
+			{
+				return -zfar * znear / (depth * (zfar - znear) - zfar);
+			}
+			
+			float gather(float i, float j, int ringsamples,
+						 inout vec3 c, float w, float h, float blur)
+			{
+				float rings2 = float(rings);
+				float step = PI * 2.0 / float(ringsamples);
+				float pw = cos(j * step) * i;
+				float ph = sin(j * step) * i;
+				float p = 1.0;
+				
+				c += color(vUv.xy + vec2(pw * w, ph * h), blur) * mix( 1.0, i / rings2, bias) * p;
+				return 1.0 * mix(1.0, i / rings2, bias) * p;
+			}
+			
+			void main()
+			{
+				float depth = linearize(texture2D(depthTexture, vUv.xy).x);
+				
+				float fDepth = focalDepth;
+				
+				float f = focalLength;
+				float d = fDepth * 1000.0;
+				float o = depth * 1000.0;
+				
+				float a = (o * f) / (o - f);
+				float b = (d * f) / (d - f);
+				float c = (d - f) / (d * fStop * CoC);
+				
+				float blur = abs(a - b) * c;
+				blur = clamp(blur, 0.0, 1.0);
+				
+				vec2 noise = rand(vUv.xy) * namount * blur;
+				
+				float w = (1.0 / width) * blur * maxblur + noise.x;
+				float h = (1.0 / height) * blur * maxblur + noise.y;
+				
+				vec3 c = vec3(0.0);
+				c = texture2D(colorTexture, vUv.xy).rgb;
+				
+				if(blur >= 0.5)
+				{
+					float s = 1.0;
+					int ringsamples;
+					
+					for(int i = 1; i <= rings; ++i)
+					{
+						ringsamples = i * samples;
+						
+						for(int j = 0; j < maxringsamples; ++j)
+						{
+							if(j >= ringsamples)
+								break;
+							s += gather(float(i), float(j), ringsamples, c, w, h, blur);
+						}
+					}
+					
+					c /= s;
+				}
+				
+				gl_FragColor = vec4(c, 1.0);
+			}
+		</script>
+		
+		<script src="Script/Settings.js"></script>
+		<script src="Script/Screen.js"></script>
+		<script src="Script/Game.js"></script>
+		<script src="Script/Beat.js"></script>
+		<script src="Script/ShaderManager.js"></script>
+		<script src="Script/main3.js"></script>
+		
+	</body>
+
+</html>
